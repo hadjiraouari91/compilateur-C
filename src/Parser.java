@@ -1,9 +1,15 @@
+import java.util.Arrays;
 import java.util.List;
 
 public class Parser {
     private final List<Token> tokens;
     private int current = 0;
     private boolean hasError = false;
+
+    // Liste des mots-clés C valides qu'on doit ignorer (pour ne pas créer de fausses erreurs)
+    private static final List<String> IGNORED_KEYWORDS = Arrays.asList(
+        "int", "float", "char", "void", "return", "if", "else", "for", "do", "main", "printf", "scanf", "include"
+    );
 
     public Parser(List<Token> tokens) {
         this.tokens = tokens;
@@ -12,31 +18,39 @@ public class Parser {
     public void parse() {
         while (!isAtEnd()) {
             try {
-                // CAS 1 : C'est un WHILE correct
+                // CAS 1 : C'est un WHILE correct -> On analyse
                 if (match(TokenType.WHILE)) {
                     whileStatement();
                 } 
                 
                 // CAS 2 : L'utilisateur a oublié le mot 'while' -> Ça commence par '('
                 else if (check(TokenType.LPAREN)) {
-                    error(peek(), "Syntaxe invalide : Instruction 'while' manquante ou inattendue avant '('.");
+                    // On vérifie si c'est suivi d'une condition et d'une accolade, signe d'un bloc orphelin
+                    error(peek(), "Syntaxe invalide : Instruction manquante avant '('. S'agit-il d'un 'while' ?");
                     synchronize();
                 }
 
-                // CAS 3 : Faute de frappe (ex: 'whil', 'wile')
-                // On vérifie si c'est un mot suivi d'une parenthèse '('
-                else if (check(TokenType.IDENTIFIER) && peekNext().type == TokenType.LPAREN) {
+                // CAS 3 : Gestion des mots inconnus ou des fautes de frappe
+                else if (check(TokenType.IDENTIFIER)) {
                     String val = peek().value;
-                    // On autorise les fonctions C standards, mais on bloque le reste
-                    if (!val.equals("main") && !val.equals("printf") && !val.equals("scanf") && !val.equals("if")) {
+
+                    // Si c'est un mot-clé C valide (mais pas while), on l'ignore proprement
+                    if (IGNORED_KEYWORDS.contains(val)) {
+                        advance();
+                    }
+                    // Si ça ressemble à "while" (faute de frappe ex: wile, whle, whil)
+                    else if (isTypoOfWhile(val)) {
                         error(peek(), "Instruction inconnue '" + val + "'. Vouliez-vous dire 'while' ?");
-                        synchronize();
-                    } else {
-                        advance(); // C'est main() ou printf(), on laisse passer
+                        synchronize(); // On saute ce mot pour essayer de continuer
+                    }
+                    // Sinon, c'est du code inconnu (ou une variable seule), on l'ignore ou on avertit
+                    else {
+                        // Optionnel : On peut ignorer silencieusement les variables isolées
+                        advance(); 
                     }
                 }
 
-                // CAS 4 : Autre chose (int, float, etc.), on ignore
+                // CAS 4 : Autre chose (Symboles isolés, nombres...), on avance pour ne pas bloquer
                 else {
                     advance(); 
                 }
@@ -54,7 +68,7 @@ public class Parser {
         }
     }
 
-    // --- ANALYSE DU WHILE (Reste identique) ---
+    // --- ANALYSE DU WHILE (Cœur du sujet) ---
     private void whileStatement() {
         System.out.println("-> Début analyse structure WHILE");
 
@@ -63,8 +77,15 @@ public class Parser {
         consume(TokenType.RPAREN, "Attendu ')' après la condition");
         consume(TokenType.LBRACE, "Attendu '{' pour le bloc while");
 
+        // On consomme le corps de la boucle
         while (!check(TokenType.RBRACE) && !isAtEnd()) {
-             advance(); 
+             // Si on trouve un autre while imbriqué, on l'analyse aussi ! (Bonus robustesse)
+             if (check(TokenType.WHILE)) {
+                 advance();
+                 whileStatement();
+             } else {
+                 advance();
+             }
         }
 
         consume(TokenType.RBRACE, "Attendu '}' fin du bloc while");
@@ -72,13 +93,16 @@ public class Parser {
     }
 
     private void parseCondition() {
+        // Premier terme
         if (check(TokenType.IDENTIFIER) || check(TokenType.NUMBER) || check(TokenType.MON_PRENOM)) {
             advance(); 
         } else {
-            error(peek(), "Condition invalide (attendu variable ou nombre)");
+            error(peek(), "Condition invalide : attendu une variable, un nombre ou '" + TokenType.MON_PRENOM + "'");
         }
 
+        // Opérateur optionnel
         if (match(TokenType.LT, TokenType.GT, TokenType.EQUALS)) {
+            // Deuxième terme
              if (check(TokenType.IDENTIFIER) || check(TokenType.NUMBER)) {
                 advance();
             } else {
@@ -88,10 +112,15 @@ public class Parser {
     }
 
     // --- UTILITAIRES ---
+    
+    // Petite fonction pour détecter les typos de "while" (ex: whil, wile)
+    private boolean isTypoOfWhile(String text) {
+        return text.equals("whil") || text.equals("wile") || text.equals("whle") || text.equals("wyle");
+    }
+
     private Token consume(TokenType type, String message) {
         if (check(type)) return advance();
         error(peek(), message);
-        // On retourne le token actuel pour ne pas crasher, mais l'erreur est notée
         return peek(); 
     }
 
@@ -106,9 +135,9 @@ public class Parser {
             if (previous().type == TokenType.SEMICOLON) return;
             if (previous().type == TokenType.RBRACE) return;
             
-            switch (peek().type) {
-                case INT: case FLOAT: case WHILE: case IF: case RETURN:
-                    return;
+            // On s'arrête si on retrouve un mot clé connu
+            if (peek().type == TokenType.WHILE || peek().type == TokenType.INT || peek().type == TokenType.RETURN) {
+                return;
             }
             advance();
         }
@@ -135,14 +164,6 @@ public class Parser {
     }
 
     private boolean isAtEnd() { return peek().type == TokenType.EOF; }
-    
     private Token peek() { return tokens.get(current); }
-    
-    // NOUVELLE MÉTHODE NÉCESSAIRE POUR LA CORRECTION
-    private Token peekNext() { 
-        if (current + 1 >= tokens.size()) return tokens.get(tokens.size() - 1);
-        return tokens.get(current + 1); 
-    }
-
     private Token previous() { return tokens.get(current - 1); }
 }
