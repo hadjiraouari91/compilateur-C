@@ -12,17 +12,41 @@ public class Parser {
     public void parse() {
         while (!isAtEnd()) {
             try {
-                // Si on trouve un 'while', on analyse
+                // CAS 1 : C'est un WHILE correct
                 if (match(TokenType.WHILE)) {
                     whileStatement();
-                } else {
-                    advance(); // On ignore le reste (int main, declarations, etc.)
+                } 
+                
+                // CAS 2 : L'utilisateur a oublié le mot 'while' -> Ça commence par '('
+                else if (check(TokenType.LPAREN)) {
+                    error(peek(), "Syntaxe invalide : Instruction 'while' manquante ou inattendue avant '('.");
+                    synchronize();
                 }
+
+                // CAS 3 : Faute de frappe (ex: 'whil', 'wile')
+                // On vérifie si c'est un mot suivi d'une parenthèse '('
+                else if (check(TokenType.IDENTIFIER) && peekNext().type == TokenType.LPAREN) {
+                    String val = peek().value;
+                    // On autorise les fonctions C standards, mais on bloque le reste
+                    if (!val.equals("main") && !val.equals("printf") && !val.equals("scanf") && !val.equals("if")) {
+                        error(peek(), "Instruction inconnue '" + val + "'. Vouliez-vous dire 'while' ?");
+                        synchronize();
+                    } else {
+                        advance(); // C'est main() ou printf(), on laisse passer
+                    }
+                }
+
+                // CAS 4 : Autre chose (int, float, etc.), on ignore
+                else {
+                    advance(); 
+                }
+
             } catch (Exception e) {
                 synchronize();
             }
         }
         
+        // Résultat final
         if (!hasError) {
             System.out.println("\n[SUCCÈS] Analyse syntaxique terminée sans erreurs !");
         } else {
@@ -30,47 +54,31 @@ public class Parser {
         }
     }
 
-    // --- NOUVELLE MÉTHODE PRINCIPALE ---
+    // --- ANALYSE DU WHILE (Reste identique) ---
     private void whileStatement() {
         System.out.println("-> Début analyse structure WHILE");
 
-        // 1. La parenthèse ouvrante
         consume(TokenType.LPAREN, "Attendu '(' après 'while'");
-
-        // 2. La Condition (ex: i < 10)
-        // On accepte : Variable/Nombre  OPERATEUR  Variable/Nombre
         parseCondition();
-
-        // 3. La parenthèse fermante
         consume(TokenType.RPAREN, "Attendu ')' après la condition");
-
-        // 4. L'accolade ouvrante
         consume(TokenType.LBRACE, "Attendu '{' pour le bloc while");
 
-        // 5. Le corps de la boucle (on lit jusqu'à l'accolade fermante)
         while (!check(TokenType.RBRACE) && !isAtEnd()) {
-             // Ici, on pourrait valider les instructions intérieures
-             // Pour l'instant, on avance juste pour consommer le contenu
              advance(); 
         }
 
-        // 6. L'accolade fermante
         consume(TokenType.RBRACE, "Attendu '}' fin du bloc while");
-        
         System.out.println("-> Fin analyse structure WHILE");
     }
 
     private void parseCondition() {
-        // Une condition simple : x < 10
         if (check(TokenType.IDENTIFIER) || check(TokenType.NUMBER) || check(TokenType.MON_PRENOM)) {
-            advance(); // Premier terme
+            advance(); 
         } else {
             error(peek(), "Condition invalide (attendu variable ou nombre)");
         }
 
-        // Opérateur optionnel ( <, >, == )
         if (match(TokenType.LT, TokenType.GT, TokenType.EQUALS)) {
-            // Deuxième terme
              if (check(TokenType.IDENTIFIER) || check(TokenType.NUMBER)) {
                 advance();
             } else {
@@ -79,11 +87,12 @@ public class Parser {
         }
     }
 
-    // --- UTILITAIRES (Identiques à avant) ---
+    // --- UTILITAIRES ---
     private Token consume(TokenType type, String message) {
         if (check(type)) return advance();
         error(peek(), message);
-        return peek(); // Retourne le token erreur pour éviter crash
+        // On retourne le token actuel pour ne pas crasher, mais l'erreur est notée
+        return peek(); 
     }
 
     private void error(Token token, String message) {
@@ -97,7 +106,6 @@ public class Parser {
             if (previous().type == TokenType.SEMICOLON) return;
             if (previous().type == TokenType.RBRACE) return;
             
-            // On s'arrête si on retrouve un mot clé de début d'instruction
             switch (peek().type) {
                 case INT: case FLOAT: case WHILE: case IF: case RETURN:
                     return;
@@ -127,6 +135,14 @@ public class Parser {
     }
 
     private boolean isAtEnd() { return peek().type == TokenType.EOF; }
+    
     private Token peek() { return tokens.get(current); }
+    
+    // NOUVELLE MÉTHODE NÉCESSAIRE POUR LA CORRECTION
+    private Token peekNext() { 
+        if (current + 1 >= tokens.size()) return tokens.get(tokens.size() - 1);
+        return tokens.get(current + 1); 
+    }
+
     private Token previous() { return tokens.get(current - 1); }
 }
